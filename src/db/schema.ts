@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   date,
   index,
   integer,
@@ -305,6 +306,17 @@ export const rateLimits = pgTable(
   },
   (t) => [uniqueIndex("rate_limits_key_window_idx").on(t.key, t.windowStart)],
 );
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+/** Ficheiros guardados na própria BD (driver de armazenamento "db", usado no Vercel). */
+export const mediaFiles = pgTable("media_files", {
+  key: text("key").primaryKey(),
+  contentType: text("content_type").notNull(),
+  size: integer("size").notNull(),
+  data: bytea("data").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export type Vehicle = typeof vehicles.$inferSelect;
 export type NewVehicle = typeof vehicles.$inferInsert;

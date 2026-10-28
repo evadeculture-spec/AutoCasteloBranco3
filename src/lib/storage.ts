@@ -3,17 +3,32 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
- * Armazenamento de ficheiros: Netlify Blobs em produção (Netlify), disco local em desenvolvimento.
- * As imagens são servidas por /api/media/<chave>.
+ * Armazenamento de ficheiros, servido por /api/media/<chave>:
+ * - "blobs": Netlify Blobs (por omissão dentro da Netlify)
+ * - "db": tabela media_files no Postgres (por omissão no Vercel, onde o disco não é persistente)
+ * - "local": disco em .data/uploads (desenvolvimento)
  */
 
 const STORE = "acb-media";
 const LOCAL_DIR = path.join(process.cwd(), ".data", "uploads");
 
+type Driver = "blobs" | "db" | "local";
+
+function driver(): Driver {
+  const d = process.env.STORAGE_DRIVER;
+  if (d === "local" || d === "blobs" || d === "db") return d;
+  if (process.env.NETLIFY || process.env.NETLIFY_BLOBS_CONTEXT || process.env.NETLIFY_SITE_ID) return "blobs";
+  if (process.env.VERCEL) return "db";
+  return "local";
+}
+
 function blobsEnabled(): boolean {
-  if (process.env.STORAGE_DRIVER === "local") return false;
-  if (process.env.STORAGE_DRIVER === "blobs") return true;
-  return Boolean(process.env.NETLIFY || process.env.NETLIFY_BLOBS_CONTEXT || process.env.NETLIFY_SITE_ID);
+  return driver() === "blobs";
+}
+
+async function dbStore() {
+  const [{ db, schema }, { eq }] = await Promise.all([import("@/db"), import("drizzle-orm")]);
+  return { db, table: schema.mediaFiles, eq };
 }
 
 async function blobStore() {
@@ -30,6 +45,12 @@ function safeKey(key: string): string {
 
 export async function putFile(key: string, data: ArrayBuffer, contentType: string): Promise<void> {
   key = safeKey(key);
+  if (driver() === "db") {
+    const { db, table } = await dbStore();
+    const buf = Buffer.from(data);
+    await db.insert(table).values({ key, contentType, size: buf.byteLength, data: buf }).onConflictDoUpdate({ target: table.key, set: { contentType, size: buf.byteLength, data: buf } });
+    return;
+  }
   if (blobsEnabled()) {
     const store = await blobStore();
     await store.set(key, data, { metadata: { contentType } });
@@ -43,6 +64,13 @@ export async function putFile(key: string, data: ArrayBuffer, contentType: strin
 
 export async function getFile(key: string): Promise<{ data: ArrayBuffer; contentType: string } | null> {
   key = safeKey(key);
+  if (driver() === "db") {
+    const { db, table, eq } = await dbStore();
+    const [row] = await db.select({ data: table.data, contentType: table.contentType }).from(table).where(eq(table.key, key));
+    if (!row) return null;
+    const buf = row.data;
+    return { data: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer, contentType: row.contentType };
+  }
   if (blobsEnabled()) {
     const store = await blobStore();
     const res = await store.getWithMetadata(key, { type: "arrayBuffer" });
@@ -60,6 +88,11 @@ export async function getFile(key: string): Promise<{ data: ArrayBuffer; content
 
 export async function deleteFile(key: string): Promise<void> {
   key = safeKey(key);
+  if (driver() === "db") {
+    const { db, table, eq } = await dbStore();
+    await db.delete(table).where(eq(table.key, key));
+    return;
+  }
   if (blobsEnabled()) {
     const store = await blobStore();
     await store.delete(key);

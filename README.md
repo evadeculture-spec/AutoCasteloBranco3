@@ -34,7 +34,7 @@ Copie `.env.example` para `.env`.
 | `RESEND_API_KEY` | não | Ativa emails (confirmação ao cliente e notificação à equipa). |
 | `EMAIL_FROM` | não | Remetente, ex.: `AutoCasteloBranco <geral@dominio.pt>` (domínio verificado no Resend). |
 | `EMAIL_NOTIFY_TO` | não | Destinatários internos das notificações, separados por vírgula. |
-| `STORAGE_DRIVER` | não | `local` ou `blobs` para forçar o armazenamento. Por omissão: Blobs dentro da Netlify, disco local fora. |
+| `STORAGE_DRIVER` | não | `local`, `blobs` ou `db` para forçar o armazenamento. Por omissão: Blobs na Netlify, tabela `media_files` no Vercel, disco local no resto. |
 | `NETLIFY_SITE_ID` + `NETLIFY_BLOBS_TOKEN` | não | Só para usar os Blobs de produção a partir da sua máquina. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | não | Alternativa aos argumentos do `admin:create` e usados pelo teste E2E. |
 
@@ -84,7 +84,15 @@ As ilustrações das viaturas estão em `public/seed/` (já incluídas). Para as
 4. Deploy. O `netlify.toml` corre `npm run db:migrate && npm run build`. **A BD tem de estar acessível durante o build** (as páginas estáticas são pré-geradas a partir dela).
 5. Uma única vez, a partir da sua máquina com `DATABASE_URL` de produção: `npm run db:seed` (opcional, só para demonstração) e `npm run admin:create -- …`.
 
-As fotos carregadas no backoffice vão para o store `acb-media` do Netlify Blobs automaticamente. As fotos de retoma (`leads/…`) só são servidas a administradores autenticados.
+### Deploy no Vercel (+ Postgres Supabase)
+
+1. Crie uma base de dados Postgres (ex.: Supabase) e aplique as migrações (`npm run db:migrate` com `DATABASE_URL`, ou o SQL de `drizzle/`). Use a ligação do **pooler** (`…pooler.supabase.com:6543`), compatível com funções serverless.
+2. Importe o repositório no Vercel. O `vercel.json` já define `npm run db:migrate && npm run build` e a região `cdg1` (Paris).
+3. Variáveis: `DATABASE_URL`, `APP_SECRET`, `NEXT_PUBLIC_SITE_URL` (+ Resend opcional).
+4. No Vercel as fotos ficam na tabela `media_files` da própria BD (`STORAGE_DRIVER=db`, escolhido automaticamente quando `VERCEL` está definido), porque o disco das funções não é persistente.
+5. Se usar Supabase, ative RLS em todas as tabelas do schema `public` e retire privilégios a `anon`/`authenticated` — a app liga-se com um papel próprio, dono das tabelas, e os dados não ficam expostos pela API REST do Supabase.
+
+As fotos carregadas no backoffice na Netlify vão para o store `acb-media` do Netlify Blobs automaticamente. As fotos de retoma (`leads/…`) só são servidas a administradores autenticados.
 
 Limites tidos em conta: as fotos são redimensionadas **no browser** (máx. 2000 px no admin, 1400 px na retoma) antes do envio, para ficar abaixo do limite de 6 MB por pedido das funções Netlify (`serverActions.bodySizeLimit` = 5 MB).
 
