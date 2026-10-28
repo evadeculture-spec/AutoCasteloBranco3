@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+.netlify
+.data
+.env
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+tests/e2e-results.json
